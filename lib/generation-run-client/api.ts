@@ -137,7 +137,12 @@ export function holdRunOutline(
 
 export function retryRun(
   runId: string,
-  command: { commandId: string; media?: { elementId: string } },
+  command: {
+    commandId: string;
+    media?: { elementId: string };
+    voice?: { providerId: string; voiceId: string; speed?: number };
+    retryAfterVoiceFailure?: boolean;
+  },
 ): Promise<{ state: string }> {
   return postJson(
     `/api/generation-runs/${encodeURIComponent(runId)}/retry`,

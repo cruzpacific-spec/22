@@ -48,6 +48,75 @@ describe('run narration voices', () => {
     ).toBe('Cherry');
   });
 
+  it('a voice-failure retry drives narration through the updated preference, not the stale one', () => {
+    // The run paused at narration because the bound voice clone was reported
+    // gone (QWEN_VC_VOICE_NOT_FOUND). On Retry the learner's updated voice
+    // replaces input.voice; the resumed engine calls clipVoice with the new
+    // preference. A fresh execution starts with an empty unavailable set.
+    const stale = { providerId: 'qwen-tts' as const, voiceId: 'qwen-tts-vc-clone-1' };
+    const updated = { providerId: 'qwen-tts' as const, voiceId: 'qwen-tts-vc-clone-2' };
+
+    // Before the retry: the stale preference names the dead clone; the slot
+    // voice (globalVoice) derived from it is the same dead clone, so clipVoice
+    // returns it — narration would fail again.
+    const beforeRetry = clipVoice({
+      target: qwen,
+      preference: stale,
+      bound: stale,
+      unavailable: new Set(),
+    });
+    expect(beforeRetry?.voice.voiceId).toBe(stale.voiceId);
+
+    // After the retry: the voice override updated input.voice to the re-cloned
+    // voice. With the explicit retry-after-voice-failure signal, clipVoice
+    // derives the slot voice from the new preference, so narration uses the
+    // updated clone and succeeds.
+    const afterRetry = clipVoice({
+      target: qwen,
+      preference: updated,
+      bound: stale,
+      unavailable: new Set(),
+      retryAfterVoiceFailure: true,
+    });
+    expect(afterRetry?.voice.voiceId).toBe(updated.voiceId);
+  });
+
+  it("a normal run continues to use the teacher's bound voice even when global preference differs", () => {
+    // Normal runs with a global preference different from the teacher's bound
+    // voice must keep using the teacher's bound voice unless resuming after a
+    // voice failure.
+    const bound = { providerId: 'qwen-tts' as const, voiceId: 'Ethan' };
+    const globalPreference = { providerId: 'qwen-tts' as const, voiceId: 'Cherry' };
+    const chosen = clipVoice({
+      target: qwen,
+      preference: globalPreference,
+      bound,
+      unavailable: new Set(),
+    });
+    expect(chosen?.voice.voiceId).toBe('Ethan');
+  });
+
+  it('recognizes operator-defined voices in configured catalogue on retry after voice failure', () => {
+    const operatorVoiceId = 'operator-custom-voice';
+    const targetWithOperatorVoice: RunNarrationTarget = {
+      ...qwen,
+      connection: {
+        ...qwen.connection,
+        voices: [{ id: operatorVoiceId, name: 'Operator Voice' }],
+      },
+    };
+    const operatorVoice = { providerId: 'qwen-tts' as const, voiceId: operatorVoiceId };
+    const stale = { providerId: 'qwen-tts' as const, voiceId: 'qwen-tts-vc-clone-1' };
+    const chosen = clipVoice({
+      target: targetWithOperatorVoice,
+      preference: operatorVoice,
+      bound: stale,
+      unavailable: new Set(),
+      retryAfterVoiceFailure: true,
+    });
+    expect(chosen?.voice.voiceId).toBe(operatorVoiceId);
+  });
+
   it('prefers the bound teacher voice until this run found it unusable', () => {
     const bound = clipVoice({
       target: qwen,
